@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "QuickFind",
+  "version": "1.0",
+  "description": "在过去24小时内搜索关键词相关信息并生成优化总结",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/*",
+    "https://api.twitter.com/*",
+    "https://api-free.deepl.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "images/16.png",
+      "48": "images/48.png",
+      "128": "images/128.png"
+    }
+  },
+  "icons": {
+    "16": "images/16.png",
+    "48": "images/48.png",
+    "128": "images/128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+} 

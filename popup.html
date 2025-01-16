@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>QuickFind</title>
+  <link rel="stylesheet" href="css/popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="search-section">
+      <input type="text" id="searchInput" placeholder="输入关键词搜索...">
+      <button id="searchButton">搜索</button>
+    </div>
+
+    <div class="results-section">
+      <h3>搜索结果</h3>
+      <div id="resultsList"></div>
+    </div>
+
+    <div class="summary-section">
+      <h3>总结</h3>
+      <div id="summaryContent"></div>
+    </div>
+
+    <div class="history-section">
+      <h3>历史记录</h3>
+      <div id="historyList"></div>
+    </div>
+  </div>
+
+  <template id="result-item-template">
+    <div class="result-item">
+      <h4><a href="" target="_blank"></a></h4>
+      <div class="text-content">
+        <p class="translated-text"></p>
+        <p class="original-text hidden"></p>
+        <div class="translation-toggle">显示原文</div>
+      </div>
+      <div class="result-meta">
+        <span class="source-tag"></span>
+        <span class="time"></span>
+      </div>
+    </div>
+  </template>
+
+  <script src="js/popup.js"></script>
+</body>
+</html> 
