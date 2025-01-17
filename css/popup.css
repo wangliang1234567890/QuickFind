@@ -59,15 +59,29 @@ body {
   background-color: var(--background-white);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
-}
-
-.search-wrapper {
   display: flex;
+  align-items: center;
   gap: 12px;
 }
 
+#categorySelect {
+  flex: 2;
+  padding: 12px 16px;
+  font-size: 15px;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: var(--background-light);
+  transition: all 0.2s ease;
+}
+
+#categorySelect:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+}
+
 #searchInput {
-  flex: 1;
+  flex: 7;
   min-width: 0;
   padding: 12px 16px;
   font-size: 15px;
@@ -84,6 +98,7 @@ body {
 }
 
 #searchButton {
+  flex: 1;
   padding: 12px 24px;
   font-size: 15px;
   font-weight: 500;
@@ -532,4 +547,42 @@ body {
     border-color: #f28b82;
     background-color: rgba(242, 139, 130, 0.15);
   }
+}
+
+/* 提示区域样式 */
+.hint-section {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 10px 20px;
+  background-color: var(--background-white);
+  border-top: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.note {
+  position: absolute;
+  width: 300px;
+  max-height: 400px;
+  background-color: #f5f5f5;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  padding: 10px;
+  cursor: move;
+  z-index: 1000;
+}
+
+.close-btn {
+  position: absolute;
+  top: 5px;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
 } 

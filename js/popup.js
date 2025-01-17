@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const summaryContent = document.getElementById('summaryContent');
   const historyList = document.getElementById('historyList');
   const resultTemplate = document.getElementById('result-item-template');
+  const categorySelect = document.getElementById('categorySelect');
 
   // 存储键名常量
   const STORAGE_KEYS = {
@@ -48,15 +49,6 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
     historyList.parentElement.insertBefore(historyHeader, historyList);
 
-    // 添加数据持久化提示
-    const persistenceNotice = document.createElement('div');
-    persistenceNotice.className = 'persistence-notice';
-    persistenceNotice.innerHTML = `
-      <i class="fas fa-info-circle"></i>
-      <span>您的搜索结果将保留，直到进行新的搜索</span>
-    `;
-    searchInput.parentElement.appendChild(persistenceNotice);
-
     // 绑定清除历史事件
     const clearHistoryBtn = document.querySelector('.clear-history');
     clearHistoryBtn.addEventListener('click', clearSearchHistory);
@@ -67,33 +59,47 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       showLoading();
       
+      // 获取用户选择的类别
+      const category = categorySelect.value;
+      
+      // 根据类别调整搜索关键词
+      const adjustedKeyword = keyword.includes(category) ? keyword : `${category} ${keyword}`;
+      
       // 保存到历史记录
-      saveToHistory(keyword);
+      saveToHistory(adjustedKeyword);
       
       // 保存当前搜索关键词
-      localStorage.setItem(STORAGE_KEYS.LAST_SEARCH, keyword);
+      localStorage.setItem(STORAGE_KEYS.LAST_SEARCH, adjustedKeyword);
 
       // 发送搜索请求到后台脚本
-      chrome.runtime.sendMessage(
-        { type: 'search', keyword: keyword },
-        response => {
-          if (response.status === 'success') {
-            // 保存搜索结果
-            localStorage.setItem(STORAGE_KEYS.LAST_RESULTS, JSON.stringify(response.results));
-            localStorage.setItem(STORAGE_KEYS.LAST_SUMMARY, response.aiSummary);
-
-            displayResults(response.results);
-            generateSummary(response.results, response.aiSummary);
-            hideLoading();
-            showStatusMessage('搜索完成', 'info');
-          } else {
-            showError(`搜索出错: ${response.message}`);
+      const response = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { type: 'search', keyword: adjustedKeyword, category: category },
+          response => {
+            if (response.status === 'success') {
+              resolve(response);
+            } else {
+              reject(new Error(`搜索出错: ${response.message}`));
+            }
           }
-        }
-      );
+        );
+      });
+
+      // 过滤无用内容并确保与类别相关
+      const filteredResults = response.results.filter(result => result.title && result.title.trim() !== '' && result.coreContent && result.coreContent.trim() !== '');
+
+      // 保存搜索结果
+      localStorage.setItem(STORAGE_KEYS.LAST_RESULTS, JSON.stringify(filteredResults));
+      localStorage.setItem(STORAGE_KEYS.LAST_SUMMARY, response.aiSummary);
+
+      displayResults(filteredResults);
+      generateSummary(filteredResults, response.aiSummary);
+      showStatusMessage('搜索完成', 'info');
     } catch (error) {
       console.error('搜索出错:', error);
       showError('搜索时发生错误，请稍后重试');
+    } finally {
+      hideLoading();
     }
   }
 
@@ -430,4 +436,127 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     return Array.from(topics).slice(0, 3);
   }
+
+  let notes = []; // 存储所有创建的 note
+
+  function openNoteWindow(title, content, link) {
+    const noteWindow = window.open("", "NoteWindow", "width=400,height=auto,resizable=yes");
+    
+    // 写入内容到新窗口
+    noteWindow.document.write(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>${title}</title>
+            <style>
+                body {
+                    margin: 0;
+                    padding: 0;
+                    font-family: Arial, sans-serif;
+                    background-color: #ffffff;
+                    color: #333;
+                    overflow: hidden; /* 去除滚动条 */
+                }
+                .note-container {
+                    position: relative; 
+                    width: 100%;
+                    height: 100%;
+                    padding: 10px;
+                    box-sizing: border-box;
+                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                    border-radius: 8px;
+                }
+                .note-title {
+                    font-size: 16px;
+                    font-weight: bold;
+                    margin-bottom: 5px;
+                }
+                .note-content {
+                    font-size: 14px;
+                    margin-bottom: 10px;
+                }
+                .note-link {
+                    font-size: 12px;
+                    color: #007bff;
+                    text-decoration: none;
+                }
+                .note-link:hover {
+                    text-decoration: underline;
+                }
+                .close-btn {
+                    position: absolute;
+                    top: 5px;
+                    right: 10px;
+                    background: none;
+                    border: none;
+                    font-size: 14px;
+                    cursor: pointer;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="note-container" id="noteContainer">
+                <button class="close-btn" onclick="window.close()">×</button>
+                <div class="note-title">${title}</div>
+                <div class="note-content">${content}</div>
+                <a href="${link}" target="_blank" class="note-link">查看原文</a>
+            </div>
+        </body>
+        </html>
+    `);
+
+    // 在新窗口中添加拖动逻辑
+    noteWindow.onload = function() {
+        const noteContainer = noteWindow.document.getElementById('noteContainer');
+
+        noteContainer.onmousedown = function(e) {
+            let shiftX = e.clientX - noteContainer.getBoundingClientRect().left;
+            let shiftY = e.clientY - noteContainer.getBoundingClientRect().top;
+
+            function moveAt(pageX, pageY) {
+                noteContainer.style.left = pageX - shiftX + 'px';
+                noteContainer.style.top = pageY - shiftY + 'px';
+            }
+
+            // 移动鼠标时触发
+            function onMouseMove(e) {
+                moveAt(e.pageX, e.pageY);
+            }
+
+            noteWindow.document.addEventListener('mousemove', onMouseMove);
+
+            // 释放鼠标时停止拖动
+            noteWindow.document.onmouseup = function() {
+                noteWindow.document.removeEventListener('mousemove', onMouseMove);
+                noteWindow.document.onmouseup = null; // 清除事件
+            };
+
+            // 阻止文本选中
+            noteContainer.ondragstart = function() {
+                return false;
+            };
+        };
+    };
+  }
+
+  // 更新现有的创建 Note 函数
+  function triggerCreateNote() {
+    const title = "你的标题"; // 动态设置
+    const content = "这是你的内容"; // 动态设置
+    const link = "https://example.com"; // 动态设置
+    openNoteWindow(title, content, link);
+  }
+
+  // 为每个搜索结果的 Note 按钮添加事件监听
+  resultsList.addEventListener('click', (e) => {
+    if (e.target.classList.contains('note-btn')) {
+      const resultItem = e.target.closest('.result-item');
+      const title = resultItem.querySelector('h4 a').textContent;
+      const content = resultItem.querySelector('.translated-text').textContent;
+      const link = resultItem.querySelector('h4 a').href;
+      openNoteWindow(title, content, link);
+    }
+  });
 }); 

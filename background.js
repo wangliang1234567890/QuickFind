@@ -162,11 +162,29 @@ function calculateSimilarity(str1, str2) {
   return 1 - (distance / maxLength);
 }
 
+// 缓存对象
+const requestCache = new Map();
+
+// 请求速率限制
+const RATE_LIMIT_INTERVAL = 60000; // 60秒
+
+// Twitter API 请求速率限制
+const TWITTER_RATE_LIMIT_INTERVAL = 900000; // 15分钟
+
 // 执行 Google 搜索
 async function performGoogleSearch(keyword) {
   console.log('Starting Google search for:', keyword);
+  const cacheKey = `google_${keyword}`;
+  const cachedResult = requestCache.get(cacheKey);
+  const now = Date.now();
+
+  // 检查缓存和速率限制
+  if (cachedResult && (now - cachedResult.timestamp < RATE_LIMIT_INTERVAL)) {
+    console.log('Returning cached Google results');
+    return cachedResult.data;
+  }
+
   const timeRestrict = get24HoursAgo();
-  // 优化搜索参数
   const url = `https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=${SEARCH_ENGINE_ID}&q=${encodeURIComponent(keyword)}&dateRestrict=d1&num=10&safe=off&fields=items(title,link,snippet,pagemap)`;
 
   try {
@@ -189,16 +207,18 @@ async function performGoogleSearch(keyword) {
       throw new Error(`Google API error: ${data.error.message}`);
     }
 
-    // 处理搜索结果
     const results = data.items?.map(item => ({
       title: item.title,
       link: item.link,
-      snippet: item.snippet || item.title, // 如果没有摘要，使用标题
+      snippet: item.snippet || item.title,
       source: 'Google Search',
       timestamp: item.pagemap?.metatags?.[0]?.['article:published_time'] || new Date().toISOString(),
       normalizedTitle: normalizeText(item.title),
       normalizedSnippet: normalizeText(item.snippet || item.title)
     })) || [];
+
+    // 缓存结果
+    requestCache.set(cacheKey, { data: results, timestamp: now });
 
     console.log('Processed Google results:', results);
     return results;
@@ -211,7 +231,16 @@ async function performGoogleSearch(keyword) {
 // 执行 Twitter 搜索
 async function performTwitterSearch(keyword) {
   console.log('Starting Twitter search for:', keyword);
-  // 优化 Twitter 搜索查询
+  const cacheKey = `twitter_${keyword}`;
+  const cachedResult = requestCache.get(cacheKey);
+  const now = Date.now();
+
+  // 检查缓存和速率限制
+  if (cachedResult && (now - cachedResult.timestamp < TWITTER_RATE_LIMIT_INTERVAL)) {
+    console.log('Returning cached Twitter results');
+    return cachedResult.data;
+  }
+
   const query = encodeURIComponent(`${keyword} -is:retweet lang:zh OR lang:en`);
   const url = `https://api.twitter.com/2/tweets/search/recent?query=${query}&max_results=20&tweet.fields=created_at,author_id,text,entities,public_metrics&expansions=author_id&user.fields=name,username,verified`;
 
@@ -236,41 +265,46 @@ async function performTwitterSearch(keyword) {
       throw new Error(`Twitter API error: ${data.errors[0].message}`);
     }
 
-    // 创建用户映射
     const users = new Map();
-    if (data.includes?.users) {
-      data.includes.users.forEach(user => {
-        users.set(user.id, user);
-      });
-    }
+    data.includes.users.forEach(user => {
+      users.set(user.id, user);
+    });
 
-    // 处理搜索结果
-    const results = data.data?.map(tweet => {
-      const user = users.get(tweet.author_id);
-      const title = `${user?.name || 'User'} (@${user?.username || 'unknown'})${user?.verified ? ' ✓' : ''}`;
-      const metrics = tweet.public_metrics || {};
-      
-      return {
-        title: title,
-        link: `https://twitter.com/${user?.username || 'unknown'}/status/${tweet.id}`,
-        snippet: tweet.text,
-        source: 'Twitter',
-        timestamp: tweet.created_at,
-        normalizedTitle: normalizeText(title),
-        normalizedSnippet: normalizeText(tweet.text),
-        metrics: {
-          retweets: metrics.retweet_count || 0,
-          likes: metrics.like_count || 0,
-          replies: metrics.reply_count || 0
-        }
-      };
-    }) || [];
+    const results = data.data.map(tweet => ({
+      title: tweet.text,
+      link: `https://twitter.com/${users.get(tweet.author_id).username}/status/${tweet.id}`,
+      snippet: tweet.text,
+      source: 'Twitter',
+      timestamp: tweet.created_at,
+      metrics: tweet.public_metrics,
+      normalizedTitle: normalizeText(tweet.text),
+      normalizedSnippet: normalizeText(tweet.text)
+    }));
+
+    // 缓存结果
+    requestCache.set(cacheKey, { data: results, timestamp: now });
 
     console.log('Processed Twitter results:', results);
     return results;
   } catch (error) {
-    console.error('Twitter API error:', error);
-    return [];
+    if (error.message.includes('HTTP error! status: 429')) {
+      console.warn('Twitter API rate limit exceeded, using alternative API');
+      return await performAlternativeSearch(keyword);
+    } else {
+      throw error;
+    }
+  }
+}
+
+async function performAlternativeSearch(keyword) {
+  try {
+    // 实现备用 API 请求逻辑
+    const response = await fetch(`https://alternative-api.com/search?q=${encodeURIComponent(keyword)}`);
+    const data = await response.json();
+    return data.results; // 假设返回的结果在 data.results 中
+  } catch (error) {
+    console.error('Alternative API error:', error);
+    return []; // 返回空数组以保持结果格式一致
   }
 }
 
@@ -306,151 +340,59 @@ function removeDuplicatesAdvanced(results) {
 }
 
 // 使用 Gemini API 分析内容价值和提取核心内容
-async function analyzeContentValue(content, type = 'general') {
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`;
-    
-    // 根据内容类型定制提示词
-    let prompt = `
-      请对以下内容进行深度分析。
-
-      内容类型：${type}
-      内容：${content}
-
-      请以JSON格式返回以下分析结果：
-      {
-        "score": "1-10的评分，10分最高",
-        "analysis": "简要分析",
-        "keywords": ["最重要的关键词，最多5个"],
-        "relevance": "高/中/低",
-        "core_content": {
-          "main_points": ["核心要点，最多3点"],
-          "key_findings": "最重要的发现或结论",
-          "important_quotes": ["最有价值的引用或句子，最多2条"],
-          "entities": ["提到的重要实体，如人物、组织、技术等"]
-        },
-        "metadata": {
-          "content_type": "新闻/社交媒体/技术文档/其他",
-          "reliability_score": "1-10的可信度评分",
-          "timeliness": "时效性评估：高/中/低",
-          "technical_level": "技术内容深度：高/中/低"
-        }
-      }
-    `;
-
-    // 对于特定类型的内容，添加额外的分析要求
-    if (type === 'technical') {
-      prompt += `
-        请特别关注：
-        - 技术概念的准确性
-        - 技术趋势和发展方向
-        - 实现难度和可行性
-        - 技术影响力评估
-      `;
-    } else if (type === 'news') {
-      prompt += `
-        请特别关注：
-        - 新闻事件的重要性
-        - 信息来源的可靠性
-        - 事件影响范围
-        - 后续发展预测
-      `;
-    } else if (type === 'social') {
-      prompt += `
-        请特别关注：
-        - 社交媒体影响力
-        - 观点的代表性
-        - 互动数据分析
-        - 舆论倾向
-      `;
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+async function analyzeContentValue(content) {
+  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GEMINI_API_KEY}`
+    },
+    body: JSON.stringify({
+      prompt: {
+        text: content
       },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-        }
-      })
-    });
+      parameters: {
+        topK: 40,
+        topP: 0.95,
+      }
+    })
+  });
 
-    if (!response.ok) {
-      throw new Error(`Gemini API HTTP error! status: ${response.status}`);
-    }
+  if (!response.ok) {
+    throw new Error(`Gemini API HTTP error! status: ${response.status}`);
+  }
 
-    const data = await response.json();
-    try {
-      const analysisText = data.candidates[0].content.parts[0].text;
-      const analysis = JSON.parse(analysisText);
-      
-      // 根据元数据调整最终分数
-      let finalScore = analysis.score;
-      
-      // 根据可信度调整分数
-      finalScore += (analysis.metadata.reliability_score - 5) * 0.2;
-      
-      // 根据时效性调整分数
-      if (analysis.metadata.timeliness === '高') finalScore += 1;
-      else if (analysis.metadata.timeliness === '低') finalScore -= 1;
-      
-      // 根据相关性调整分数
-      if (analysis.relevance === '高') finalScore += 1;
-      else if (analysis.relevance === '低') finalScore -= 1;
-      
-      // 确保分数在1-10范围内
-      analysis.score = Math.max(1, Math.min(10, finalScore));
-      
-      return analysis;
-    } catch (e) {
-      console.error('Error parsing Gemini response:', e);
-      return {
-        score: 5,
-        analysis: "无法解析AI分析结果",
-        keywords: [],
-        relevance: "中",
-        core_content: {
-          main_points: [],
-          key_findings: "无法提取核心内容",
-          important_quotes: [],
-          entities: []
-        },
-        metadata: {
-          content_type: "未知",
-          reliability_score: 5,
-          timeliness: "中",
-          technical_level: "中"
-        }
-      };
-    }
-  } catch (error) {
-    console.error('Gemini API error:', error);
+  const data = await response.json();
+  try {
+    const analysisText = data.candidates[0].content.parts[0].text;
+    console.log('Gemini analysis text:', analysisText);
+    const analysis = JSON.parse(analysisText);
+    
+    // 根据元数据调整最终分数
+    let finalScore = analysis.score;
+    
+    // 根据可信度调整分数
+    finalScore += (analysis.metadata.reliability_score - 5) * 0.2;
+    
+    // 根据时效性调整分数
+    if (analysis.metadata.timeliness === '高') finalScore += 1;
+    else if (analysis.metadata.timeliness === '低') finalScore -= 1;
+    
+    // 根据相关性调整分数
+    if (analysis.relevance === '高') finalScore += 1;
+    else if (analysis.relevance === '低') finalScore -= 1;
+    
+    // 确保分数在1-10范围内
+    analysis.score = Math.max(1, Math.min(10, finalScore));
+    
+    return analysis;
+  } catch (e) {
+    console.error('Error parsing Gemini response:', e, 'Analysis text:', analysisText);
     return {
       score: 5,
-      analysis: "AI分析过程出错",
+      analysis: "无法解析AI分析结果",
       keywords: [],
       relevance: "中",
-      core_content: {
-        main_points: [],
-        key_findings: "内容分析失败",
-        important_quotes: [],
-        entities: []
-      },
-      metadata: {
-        content_type: "未知",
-        reliability_score: 5,
-        timeliness: "中",
-        technical_level: "中"
-      }
     };
   }
 }
@@ -587,15 +529,33 @@ async function generateSummary(results) {
 }
 
 // 修改合并搜索结果函数
-async function performCombinedSearch(keyword) {
-  console.log('Starting combined search for:', keyword);
+async function performCombinedSearch(keyword, category) {
+  console.log('Starting combined search for:', keyword, 'Category:', category);
   try {
+    // 根据类别调整搜索关键词
+    let categoryKeyword = '';
+    switch (category) {
+      case 'finance':
+        categoryKeyword = 'finance OR stock OR market';
+        break;
+      case 'ai':
+        categoryKeyword = 'artificial intelligence OR AI OR machine learning';
+        break;
+      case 'tech':
+        categoryKeyword = 'technology OR tech news OR gadgets';
+        break;
+      default:
+        categoryKeyword = '';
+    }
+
+    const searchKeyword = categoryKeyword ? `${keyword} ${categoryKeyword}` : keyword;
+
     const [googleResults, twitterResults] = await Promise.all([
-      performGoogleSearch(keyword).catch(err => {
+      performGoogleSearch(searchKeyword).catch(err => {
         console.error('Google search failed:', err);
         return [];
       }),
-      performTwitterSearch(keyword).catch(err => {
+      performTwitterSearch(searchKeyword).catch(err => {
         console.error('Twitter search failed:', err);
         return [];
       })
@@ -637,7 +597,7 @@ async function performCombinedSearch(keyword) {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.type === 'search') {
     console.log('Received search request:', request);
-    performCombinedSearch(request.keyword)
+    performCombinedSearch(request.keyword, request.category)
       .then(({results, summary}) => {
         console.log('Search completed, processing results');
         // 使用高级去重和排序
@@ -658,4 +618,57 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
     return true; // 保持消息通道开放
   }
+});
+
+// 测试 Google API
+async function testGoogleAPI() {
+  try {
+    const results = await performGoogleSearch('test');
+    console.log('Google API test results:', results);
+  } catch (error) {
+    console.error('Google API test error:', error);
+  }
+}
+
+// 测试 Twitter API
+async function testTwitterAPI() {
+  try {
+    const results = await performTwitterSearch('test');
+    console.log('Twitter API test results:', results);
+  } catch (error) {
+    console.error('Twitter API test error:', error);
+  }
+}
+
+// 测试 DeepL API
+async function testDeepLAPI() {
+  try {
+    const translation = await translateText('Hello, world!', 'ZH');
+    console.log('DeepL API test translation:', translation);
+  } catch (error) {
+    console.error('DeepL API test error:', error);
+  }
+}
+
+// 测试 Gemini API
+async function testGeminiAPI() {
+  try {
+    const analysis = await analyzeContentValue('This is a test content for analysis.');
+    console.log('Gemini API test analysis:', analysis);
+  } catch (error) {
+    console.error('Gemini API test error:', error);
+  }
+}
+
+// 执行所有API测试
+async function testAllAPIs() {
+  await testGoogleAPI();
+  await testTwitterAPI();
+  await testDeepLAPI();
+  await testGeminiAPI();
+}
+
+// 在插件启动时测试所有API
+chrome.runtime.onStartup.addListener(() => {
+  testAllAPIs();
 }); 

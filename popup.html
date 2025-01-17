@@ -9,6 +9,12 @@
   <div class="container">
     <div class="search-section">
       <input type="text" id="searchInput" placeholder="输入关键词搜索...">
+      <select id="categorySelect">
+        <option value="all">所有类别</option>
+        <option value="finance">财经</option>
+        <option value="ai">AI</option>
+        <option value="tech">科技新闻</option>
+      </select>
       <button id="searchButton">搜索</button>
     </div>
 
@@ -26,6 +32,10 @@
       <h3>历史记录</h3>
       <div id="historyList"></div>
     </div>
+
+    <div class="hint-section">
+      提示：输入关键词并选择类别进行搜索。
+    </div>
   </div>
 
   <template id="result-item-template">
@@ -39,6 +49,7 @@
       <div class="result-meta">
         <span class="source-tag"></span>
         <span class="time"></span>
+        <button class="note-btn">📝</button>
       </div>
     </div>
   </template>
